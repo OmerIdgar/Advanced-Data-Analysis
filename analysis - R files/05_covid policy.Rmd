@@ -1,0 +1,718 @@
+---
+title: "Covid Policy in USA states"
+author: "Guy Elovici, Idan Bibi, Omer Idgar"
+date: "20/06/2021"
+output: html_document
+---
+
+# ![](part%203%20.jpg){width="501"}
+
+# [**Intro:**]{.ul}
+
+In this part will explore the policy of the states in the USA against the spread of the covid 19. by analyzing the restrictions that the state made we would find if it helped to stop the spread of the virus.
+
+Our main research question is do closing the movies, the restaurants, the gyms, and the bars effects the daily new COVID 19 cases?
+
+We will focus on the second wave of the covid 19 in the us because in the first wave many states made a lockdown instead of closing entertainment facilities. So, we want to see the impact of only closing these facilities (because lockdown ha more impacts like closing workplaces and avoiding social distance).
+
+### [**The additional database we used:**]{.ul}
+
+The data file contains information about all the closing and opening dates of the entertainment venues in each state in the United States. In addition, information is attached to restrictions relating to keeping distance such as closures, wearing masks and preventing entry to citizens from other states. We will use these restrictions to compare with the restrictions we want to test their impact. (Assuming, of course, that the restrictions do not overlap on the same dates because in such a situation we will not be able to know who has more influenced the morbidity situation.)
+
+[Link to COVID 19 policy in US states database](https://www.openicpsr.org/openicpsr/project/119446/version/V103/view?path=/openicpsr/119446/fcr:versions/V103/COVID-19-US-State-Policy-Database-master/Previously-Published-Versions/COVID-19-US-state-policy-database-6_3_2021.xlsx&type=file)
+
+### [**Part 1- cleaning the data:**]{.ul}
+
+First, we lode the libraries that will be used to analyze and clean the data.
+
+```{r loading libraries ,warning=FALSE,message=FALSE}
+library(tidyverse)
+library(lubridate)
+library(maps)
+library(mapdata)
+library(glue)
+library(ggridges)
+library(forcats)
+library(viridis)
+library(hrbrthemes)
+library(plyr)
+
+```
+
+After that, we will read the data files that needed for this part. (The covid table from the first part and all other tables that containing information about the COVID 19 in the US).
+
+```{r reading data,warning=FALSE,message=FALSE}
+path <- "C:\\Users\\guyel\\Desktop\\Final Project"
+
+covid_table <- readRDS(file = glue("{path}\\data\\covid_table.rds"))
+state_region <- readRDS(file = glue("{path}\\data\\state_region.rds"))
+daily_information <- readRDS(file = glue("{path}\\data\\daily_information.rds"))
+death_table <- readRDS(file = glue("{path}\\data\\death_table.rds"))
+states_fullname <- readRDS(file = glue("{path}\\data\\states_fullname.rds"))
+#civiqs_poll <- read_csv(glue("{path}\\data\\civiqs_poll.csv"))
+
+covid_social_policy <- read.csv("data/COVID-19 US state social policy.csv")
+
+
+
+
+
+
+```
+
+After reading the data, we will clean a null column with name X (it was in the table, and it does not provide for us any additional value).
+
+After reading the data, we will clean a null column with name X (it was in the table, and it does not provide for us any additional value). moreover, we will make the COVID table from the first part as a pivot longer. In that way, we will have for each date a state value and the number of COVID cases in that date in the specific state. In such way, we can use the COVID data with the COVID 19 policy data.
+
+```{r cleaning the data,warning=FALSE,message=FALSE}
+covid_social_policy <- covid_social_policy[,-which(names(covid_social_policy)%in% c('X'))]
+
+
+covid_pivot <- covid_table %>%
+   pivot_longer(AK:VI,
+               names_to = "State",
+               values_to = "covid_cases")
+
+covid_pivot <- covid_pivot%>%
+  filter(covid_cases>0)
+```
+
+#### [Tidying data:]{.ul}
+
+-   The first table we will create is the `states_close_buisness_X2`table. It contains the states and the dates of opening and reopening of the restaurants, the gyms, the bars, and the movies theaters. During the second wave of COVID 19 in the US.
+
+-   then, we will rename the column names to be more informative and make the date values to be of class date (to use the dates of the opening and closing restrictions to analyze the data).
+
+```{r tyding data,warning=FALSE,message=FALSE}
+states_close_buisness_X2 <-covid_social_policy%>%
+  select(State,State.Abbreviation,Closed.restaurants..x2.,,Closed.gyms..x2.,Closed.movie.theaters..x2.,Closed.bars..x2.,Reopened.bars..x2.,Reopened.restaurants..x2.,Reopened.gyms..x2.,Reopened.movie.theaters..x2.)
+
+
+states_close_buisness_X2 <- states_close_buisness_X2[-1:-3,]
+colnames(states_close_buisness_X2) <- c("State_name","State","Closed_restaurants","Closed_gyms","Closed_movies","Closed_bars","Reopen_bars","Reopen_restaurants","Reopen_gyms","Reopen_movies")
+
+states_close_buisness_X2 <-states_close_buisness_X2%>%
+  mutate_at(vars(-"Closed_restaurants"),~gsub(",","",.)) %>%
+  mutate(Closed_restaurants  = mdy(Closed_restaurants))%>%
+  mutate(Reopen_restaurants  = mdy(Reopen_restaurants))%>%
+  mutate(Closed_gyms = mdy(Closed_gyms))%>%
+  mutate(Reopen_gyms = mdy(Reopen_gyms))%>%
+  mutate(Closed_movies = mdy(Closed_movies))%>%
+  mutate(Reopen_movies = mdy(Reopen_movies))%>%
+  mutate(Closed_bars = mdy(Closed_bars))%>%
+  mutate(Reopen_bars = mdy(Reopen_bars))
+
+top_states_close <- states_close_buisness_X2 
+top_states_join_buisness <-left_join(top_states_close,covid_pivot,by = c("State"= "State"))
+
+
+```
+
+### [**part 2- Overview of the data:**]{.ul}
+
+First, we want to see the n spread of social restriction on the USA map with colors to if the state made the restriction and if not.
+
+```{r data overview,warning=FALSE,message=FALSE}
+state <- map_data("state")
+state$region <- str_to_title(state$region)
+states_close_buisness_X2$State_name <- str_to_title(states_close_buisness_X2$State_name)
+state_rest_close <- state %>%
+  left_join(. , states_close_buisness_X2, by=c("region"="State_name"))
+
+state_rest_close %>%
+  mutate(did_close_resturnts = !is.na(Closed_restaurants),
+         did_close_gyms = !is.na(Closed_gyms),
+         did_close_bars = !is.na(Closed_bars),
+         did_close_movies = !is.na(Closed_movies)) %>%
+  gather(type, value,did_close_resturnts:did_close_movies) %>%
+  ggplot( aes(x=long, y=lat, fill=value, group=group)) +
+  geom_polygon(color = "white") +
+  facet_wrap(~type, labeller = labeller(type = c("did_close_bars" = "Bars", "did_close_gyms" = "Gyms", "did_close_movies" = "Movies","did_close_resturnts" =  "Restaurant"))) +
+  scale_fill_manual(values = c("limegreen" , "red3"), labels = c("Open" , "Close")) +
+  theme_bw() + 
+  theme(axis.title.x=element_blank(), axis.text.x=element_blank(), axis.ticks.x=element_blank(),
+  axis.title.y=element_blank(), axis.text.y=element_blank(), axis.ticks.y=element_blank(), legend.title = element_blank()) +
+  labs(title = 'U.S States Map and the social restriction in each state',caption = "https://www.openicpsr.org/openicpsr/") +
+  coord_fixed(1.3)
+
+
+
+```
+
+#### [**Plot analyzing:**]{.ul}
+
+We can see from the plot that most of the states did not made a restriction at all. Moreover, we can see that closing bars is the most common restriction in the USA.
+
+This is a helper function that will return a table with the following columns:
+
+1.  `covid_data`-- the data file we want to manipulate.
+
+2.  `start_date`-- a character that is name of restriction type (e.g., closing restaurants, closing bars).
+
+3.  `State`-- 2 letters of the state abbreviations (e.g., CA, MA).
+
+4.  `covid`-- column of the COVID cases in the state in each date
+
+The function return data frame with the following columns: `Date`, `COVID`cases in the specific date, date when the restriction started and the state name. the `Date`values are in the range of +-21 days from the `Start_date`value (21 days before the restriction and 21 days after the restriction date). The reason we choose this range from the `Start_date`is because we want to see if there is an impact after the restriction started in terms of number of new COVID 19 cases.
+
+```{r helper function,warning=FALSE,message=FALSE}
+filter_by_restriction <- function(covid_data,start_date,state,covid){
+  start_date <- rlang::sym(start_date)
+  temp <- covid_data%>%
+    select(start_date,State)%>%
+    filter(State ==state)
+  start_date_value <- temp[1,1]
+  covid <- rlang::sym(covid)
+  result <- covid_data%>%
+    select(Date,covid,start_date,State)%>%
+    filter(State == state)%>%
+    filter(  Date <=start_date_value +21 & Date>=start_date_value -21)
+  return(result)
+}
+
+```
+
+#### [Creating more simple tables:]{.ul}
+
+Because the data contains a lot of null values (because most of the states did not made any restriction), we created a new table called `top_states_close`that shows for each state the social restriction type and the date when the restriction stated.
+
+```{r creating simple tables,warning=FALSE,message=FALSE}
+states_close <- top_states_close%>%
+  gather(Social_restriction,Start_date,Closed_restaurants:Closed_bars)%>%
+  select(State,Social_restriction,Start_date)%>%
+  drop_na()
+
+
+
+```
+
+### [**part 3- Analyze the effect of closing the facilities on the spread of the COVID19:**]{.ul}
+
+#### [COVID spread in Pennsylvania:]{.ul}
+
+We choose Pennsylvania because this state is the one of only 2 states that closed all 4 social facilities. In Pennsylvania they closed only the bars in July 2020 and 5 mounts after that, they closed the gyms, movies, and restaurants.
+
+We want to see the daily COVID cases in the range between 21 days before the closing restriction and 21 days after the closing restriction. The daily cases divided by the total COVID cases in this period to see the actual affect on the spread of the virus.
+
+```{r Pennsylvania plot ,asp = 2,warning=FALSE,message=FALSE}
+pa_bar_close <- filter_by_restriction(top_states_join_buisness,"Closed_bars","PA","covid_cases")
+pa_gyms_close <- filter_by_restriction(top_states_join_buisness,"Closed_gyms","PA","covid_cases")
+pa_movies_close <- filter_by_restriction(top_states_join_buisness,"Closed_movies","PA","covid_cases")
+pa_Closed_restaurants <- filter_by_restriction(top_states_join_buisness,"Closed_restaurants","PA","covid_cases")
+
+pa_bar_cases_sum <- sum(pa_bar_close$covid_cases)
+pa_bar_close <- pa_bar_close%>%
+  mutate(caes_sum_ratio = covid_cases/pa_bar_cases_sum)
+
+pa_close_bar_plot <-  pa_bar_close %>%
+  ggplot(aes(x = Date, y = caes_sum_ratio)) +
+  geom_line(size = 1.05) +
+  geom_point(aes(y = caes_sum_ratio)) + 
+  geom_vline(xintercept=as.numeric(pa_bar_close$Closed_bars[1]), linetype=1,color = "red", size = 1.05)+
+  geom_text(aes(x=Closed_bars[1],label=knitr::asis_output("start closing bars \U2192"), y = 0, hjust = 1.04, vjust = -0.5), color = "red", size = 3.7) + 
+  scale_x_date(date_breaks  = "3 days", date_labels = "%b %d") +
+  labs(
+  title = "Proportion of New Covid Cases In Pennsylvania State",
+  subtitle = "Measured 3 weeks before and after closing bars",
+  x = NULL, y = "Proportion") +
+  scale_fill_brewer(palette="Dark2") +
+  theme_bw() + 
+  theme(legend.position="top", axis.text.x = element_text(angle = 60, hjust = 1, colour = "black"))
+
+
+pa_gyms_cases_sum <- sum(pa_gyms_close$covid_cases)
+pa_gyms_close <- pa_gyms_close%>%
+  mutate(caes_sum_ratio = covid_cases/pa_gyms_cases_sum)
+
+
+
+pa_close_gyms_plot <-  pa_gyms_close %>%
+  ggplot(aes(x = Date, y = caes_sum_ratio)) +
+  geom_line(size = 1.05) +
+  geom_point(aes(y = caes_sum_ratio)) + 
+  geom_vline(xintercept=as.numeric(pa_gyms_close$Closed_gyms[1]), linetype=1,color = "red", size = 1.05)+
+  geom_text(aes(x=Closed_gyms[1], label=knitr::asis_output("start closing gyms, movies and restaurants \U2192"), y = 0, hjust = 1.01, vjust = -0.5), color = "red", size = 3.7) + 
+  scale_x_date(date_breaks  = "4 days", date_labels = "%b %d") +
+  labs(
+  title = "Proportion of New Covid Cases In Pennsylvania State",
+  subtitle = "Measured 3 weeks before and after closing gym, movies and restaurants",
+  x = NULL, y = "Proportion",caption = "https://www.openicpsr.org/openicpsr/") +
+  scale_fill_brewer(palette="Dark2") +
+  theme_bw() + 
+  theme(legend.position="top",axis.text.x = element_text(angle = 60, hjust = 1, colour = "black"))
+
+pa_movies_cases_sum <- sum(pa_movies_close$covid_cases)
+pa_movies_close <- pa_movies_close%>%
+  mutate(caes_sum_ratio = covid_cases/pa_movies_cases_sum)
+
+
+
+
+
+gridExtra::grid.arrange(pa_close_bar_plot,pa_close_gyms_plot)
+
+
+
+```
+
+#### [**Plot analyzing:**]{.ul}
+
+we can see from the plot that only closing the bars did not made a signific impact on the daily new cases. Also, we cans see that closing the movies, gyms and the restaurants made an effect on the daily new cases, and we can see a beginning of downward trend about 14 days after the restriction started.
+
+#### [**Analyzing the restriction duration in each state:**]{.ul}
+
+After we saw that the restrictions made a certain impact, we want to see how many days the restriction last. Because maybe there is needed only a short time restriction, or maybe the restriction needs to last a large amount of time.
+
+```{r restriction duration plot,warning=FALSE,message=FALSE}
+states_close<- top_states_close%>%
+  gather(Social_restriction,Start_date,Closed_restaurants:Closed_bars,)%>%
+  select(State,Social_restriction,Start_date)%>%
+  drop_na()
+  # group_by(State) %>%
+  # mutate(Diff = c(NA, diff(Start_date)))
+states_reopen <- top_states_close%>%
+  gather(Social_resopening,Reopen_date,Reopen_bars:Reopen_movies)%>%
+  select(State,Social_resopening,Reopen_date)%>%
+  drop_na()
+
+states_close_reopen <- left_join(states_close,states_reopen,by = c("State" = "State"))
+
+states_close_reopen <- states_close_reopen%>%
+  mutate(Social_resopening = case_when(
+    Social_resopening == "Reopen_restaurants " ~ "Reopen_restaurants",
+    TRUE ~ Social_resopening
+  )) %>%
+  filter(substr(Social_restriction,nchar(Social_restriction)-4,nchar(Social_restriction)) ==  substr(Social_resopening,nchar(Social_resopening)-4,nchar(Social_resopening)))%>%
+  mutate(Restriction_time = Reopen_date - Start_date)
+
+
+states_close_reopen %>%
+  mutate(State = fct_reorder(State,Restriction_time))%>%
+  ggplot(aes(x = State,y = Restriction_time, fill = Social_restriction)) +
+    geom_bar(stat  = 'identity', position = position_dodge2(preserve = "single")) + 
+  facet_wrap(~Social_restriction, labeller = labeller(Social_restriction = c("Closed_bars" = "Bars", "Closed_gyms" = "Gyms", "Closed_movies" = "Movies","Closed_restaurants" =  "Restaurant")),scales = "free_x") +
+  scale_fill_discrete(labels = c("Bars", "Gyms", "Movies", "Restaurant")) + 
+  theme_bw() +
+    labs(title = "The number of days each social places was closed during Covid",
+       y = "Number of Days",
+       fill = "Social Places",caption = "https://www.openicpsr.org/openicpsr/")
+
+
+```
+
+#### [**Plot analyzing:**]{.ul}
+
+We can see from the plot that most of the restrictions lest less then 100 days. On the other hand, we can see that a couple of states made a restriction that last almost a year (e.g., Arizona and California).
+
+#### [**Lockdown vs closing social facilities effect:**]{.ul}
+
+In the first wave of the covid 19 most states in the US made lockdown instead of closing the stores. We want to see if the closing of stores is as effective as the lockdown, or maybe its better to closing the stores because we know that the economic price of lockdown is extremely high.
+
+We created a table of the states that made a lockdown and the beginning and ending of the lockdown.
+
+First, we want to see if most of the states in the us made a lockdown (like we made the USA map of states who made social restrictions in the second wave).
+
+```{r lockdown overview plot,warning=FALSE,message=FALSE}
+
+states_lockdown <-covid_social_policy%>%
+  select(State,State.Abbreviation,Stay.at.home..shelter.in.place,End.relax.stay.at.home.shelter.in.place)
+
+
+states_lockdown <- states_lockdown[-1:-3,]
+colnames(states_lockdown) <- c("State_name","State","Lockdown_start_date","Lockdown_end_date")
+
+states_lockdown <-states_lockdown%>%
+  mutate_at(vars(-"Lockdown_start_date"),~gsub(",","",.)) %>%
+  mutate(Lockdown_start_date = mdy(Lockdown_start_date))%>%
+  mutate(Lockdown_end_date = mdy(Lockdown_end_date))
+
+states_lockdown <-  states_lockdown %>%
+  rowwise() %>%
+  do( (.) %>% as.data.frame %>%
+  mutate(did_lockdown = all(!is.na(Lockdown_start_date))))
+
+
+lock_down_covid <- covid_table%>%
+  inner_join(. , states_lockdown, by=c("Date"="Lockdown_start_date"))
+lock_down_covid <- unique(lock_down_covid)
+
+
+
+
+covid_lockdown <- left_join(covid_pivot,states_lockdown,by = c("State"= "State"))
+state_lockdown_close <- state %>%
+  left_join(. , states_lockdown, by=c("region"="State_name"))
+
+state_lockdown_close[!is.na(state_lockdown_close$did_lockdown),] %>%
+  gather(type, value,did_lockdown) %>%
+  ggplot( aes(x=long, y=lat, fill=value, group=group)) +
+  geom_polygon(color = "white") +
+  facet_wrap(~type, labeller = labeller(type = c("did_close_bars" = "Bars", "did_close_gyms" = "Gyms", "did_close_movies" = "Movies","did_close_resturnts" =  "Restaurant"))) +
+  scale_fill_manual(values = c("limegreen" , "red3"), labels = c("Dident made lockdown" , "Made lockdown")) +
+  theme_bw() + 
+  theme(axis.title.x=element_blank(), axis.text.x=element_blank(), axis.ticks.x=element_blank(),
+  axis.title.y=element_blank(), axis.text.y=element_blank(), axis.ticks.y=element_blank(), legend.title = element_blank()) +
+  labs(title = 'U.S States Map and if the state made a lockdown',caption = "https://www.openicpsr.org/openicpsr/") +
+  coord_fixed(1.3)
+
+```
+
+#### [**Plot analyzing:**]{.ul}
+
+As we can see from the plot, most of the states made a lockdown (unlike we saw in the second wave that most of the states did not made any restriction).
+
+#### [**Compering the effect of lockdown compere to social restrictions:**]{.ul}
+
+ We want to compere the effect of lockdown in the state of Pennsylvania (because this state closed in the second wave all the social facilities we are checking). We check the daily new cases in the period of +-21 days before and after the lockdown made. In that way we can see the impact of the lockdown.
+
+```{r lockdown vs social restriction plot,warning=FALSE,message=FALSE}
+colnames(covid_lockdown)[2] <- "State"
+
+pa_lockdown <- filter_by_restriction(covid_lockdown,"Lockdown_start_date","PA","covid_cases")
+
+
+pa_lock_cases_sum <- sum(pa_lockdown$covid_cases)
+pa_lockdown <- pa_lockdown%>%
+  mutate(cases_sum_ratio = covid_cases/pa_lock_cases_sum)
+
+pa_closed_sum <- sum(pa_Closed_restaurants$covid_cases)
+pa_Closed_restaurants <- pa_Closed_restaurants%>%
+  mutate(cases_sum_ratio = covid_cases/pa_closed_sum)
+
+
+
+pa_lockdown <- pa_lockdown%>%
+  mutate(days_pass_from_lockdown = Date - Lockdown_start_date)
+pa_Closed_restaurants <- 
+  pa_Closed_restaurants%>%
+  mutate(days_pass_from_close = Date - Closed_restaurants)
+pa_lockdown_compere <- left_join(pa_lockdown,pa_Closed_restaurants,by = c("State" = "State"))
+
+pa_lockdown_compere <- pa_lockdown_compere%>%
+ mutate(change_full_lockdwon = covid_cases.x - lag(covid_cases.x, default = covid_cases.x[1]),
+        change_stores_close = covid_cases.y - lag(covid_cases.y, default = covid_cases.y[1]))
+
+
+
+pa_lockdown_plot <- pa_lockdown_compere %>%
+  ggplot( aes(x=Date.x,y= cases_sum_ratio.x)) +
+  geom_density(fill="#69b3a2", color="#e9ecef", alpha=0.8,stat = "identity")+
+  geom_vline(xintercept=as.numeric(pa_lockdown_compere$Lockdown_start_date[1]), linetype=1,color = "red", size = 1.05)+
+  geom_text(aes(x=Lockdown_start_date[1],label=knitr::asis_output("Start of lockdown \U2192"), y = 0, hjust = 1.04, vjust = -0.5), color = "red", size = 3.7) + 
+  scale_x_date(date_breaks  = "3 days", date_labels = "%b %d") +
+  labs(
+  title = "Proportion of New Covid Cases In Pennsylvania State",
+  subtitle = "Measured 3 weeks before and after closing bars",
+  x = NULL, y = "Proportion") +
+  scale_fill_brewer(palette="Dark2") +
+  theme_bw() + 
+  theme(legend.position="top", axis.text.x = element_text(angle = 60, hjust = 1, colour = "black"))
+
+pa_stores_close_plot <- pa_lockdown_compere %>%
+  ggplot( aes(x=Date.y,y= cases_sum_ratio.y)) +
+  geom_density(fill="#69b3a2", color="#e9ecef", alpha=0.8,stat = "identity")+
+    geom_vline(xintercept=as.numeric(pa_Closed_restaurants$Closed_restaurants[1]), linetype=1,color = "red", size = 1.05)+
+  geom_text(aes(x=Closed_restaurants[1],label=knitr::asis_output("start closing stores \U2192"), y = 0, hjust = 1.04, vjust = -0.5), color = "red", size = 3.7) + 
+  scale_x_date(date_breaks  = "3 days", date_labels = "%b %d") +
+  labs(
+  title = "Proportion of New Covid Cases In Pennsylvania State",
+  subtitle = "Measured 3 weeks before and after closing bars",
+  x = NULL, y = "Proportion",caption = "https://www.openicpsr.org/openicpsr/") +
+  scale_fill_brewer(palette="Dark2") +
+  theme_bw() + 
+  theme(legend.position="top", axis.text.x = element_text(angle = 60, hjust = 1, colour = "black"))
+
+gridExtra::grid.arrange(pa_lockdown_plot,pa_stores_close_plot)
+
+
+```
+
+#### [**Plot analyzing:**]{.ul}
+
+You can see from the plot that the closure was carried out in Pennsylvania following an upward trend that began about two weeks ago. It can be seen that the closure failed to reduce the number of new cases even though it lasted almost a month. In contrast, the closure of the entertainment venues in December did cause a decline in the new cases. In addition, the ratio of new cases is lower in the second plot of the closure of entertainment venues.
+
+#### [**Closing entertainment venues versus a state that didn't close them:**]{.ul}
+
+We would now like to compare a state that has closed all entertainment venues compared to a state that has not closed them at all. We chose the state of Massachusetts which did not close any of the entertainment venues and compared it with Pennsylvania which closed all the entertainment venues we check out. The reason we chose Pennsylvania again is because it is a state that is similar in climate to Massachusetts and relatively large (we would like as few other external factors as possible to have an impact besides the closure of entertainment venues).
+
+```{r closing vs not closing plot,warning=FALSE,message=FALSE}
+
+pa_close_date <- mdy("12-12-2020")
+ma_cases <- top_states_join_buisness%>%
+  select(Date,covid_cases,State)%>%
+  filter(State == "MA")%>%
+  filter(  Date <=pa_close_date +21 & Date>=pa_close_date -21)
+
+
+ca_cases_sum <- sum(ma_cases$covid_cases)
+ma_cases <- ma_cases%>%
+  mutate(caes_sum_ratio = covid_cases/ca_cases_sum)
+
+
+mean_pa <-  mean(pa_Closed_restaurants$caes_sum_ratio)
+ma_mean_cases <- mean(ma_cases$caes_sum_ratio)
+ma_plot <-  ma_cases %>%
+  ggplot(aes(x = Date, y = caes_sum_ratio)) +
+  geom_line(size = 1.05) +
+  geom_point(aes(y = caes_sum_ratio)) + 
+  labs(
+  title = "The amount of infection daily for the five countries with the largest population",
+  subtitle = "Measured in the worst period, and last month in the United States",
+  x = NULL, y = "Daily infections") +
+  scale_fill_brewer(palette="Dark2") +
+  theme(legend.position="top")+
+  scale_x_date(date_breaks  = "4 days", date_labels = "%b %d") +
+  labs(
+  title = "Proportion of New Covid Cases In Massachusetts  State",
+  subtitle = "Measured 3 weeks before and after closing gym, movies and restaurants in Pennsylvania",
+  x = NULL, y = "Proportion",caption = "https://www.openicpsr.org/openicpsr/") +
+  scale_fill_brewer(palette="Dark2") +
+  theme_bw() + 
+  theme(legend.position="top",axis.text.x = element_text(angle = 60, hjust = 1, colour = "black"))
+
+
+  
+
+
+gridExtra::grid.arrange(pa_close_gyms_plot,ma_plot)
+
+
+```
+
+#### [**Plot analyzing:**]{.ul}
+
+You can quite clearly see that the closure of entertainment venues in Pennsylvania is causing a decline in morbidity. On the other hand, in Massachusetts, the morbidity trend increased at the time (because there were no restrictions there at all). In addition, the value of the morbidity in Massachusetts reaches 0.05 compared to Pennsylvania, which peaks at about 0.03, so it can be concluded that closing the entertainment venues can prevent an increase in new morbidity cases.
+
+#### [**The effect of reopening entertainment venues on new COVID cases:**]{.ul}
+
+We saw that the closure of the entertainment venues caused a decrease in morbidity. Now, in order to reinforce the claim that the closure caused a decline in new coronavirus cases, we would like to see how the reopening of the entertainment venues will affect new coronavirus cases. And if there appears to be an increase in the new coronavirus cases, the claim that closing the places affects the morbidity will be strengthened.
+
+```{r reopening stores effect plot,warning=FALSE,message=FALSE}
+mn_bar_Reopen <- filter_by_restriction(top_states_join_buisness,"Reopen_bars","MN","covid_cases")
+mn_gyms_Reopen <- filter_by_restriction(top_states_join_buisness,"Reopen_gyms","MN","covid_cases")
+mn_movies_Reopen <- filter_by_restriction(top_states_join_buisness,"Reopen_movies","MN","covid_cases")
+mn_closed_Reopen <- filter_by_restriction(top_states_join_buisness,"Reopen_restaurants","MN","covid_cases")
+
+mn_bar_cases_sum <- sum(mn_bar_Reopen$covid_cases)
+mn_bar_Reopen <- mn_bar_Reopen%>%
+  mutate(caes_sum_ratio = covid_cases/mn_bar_cases_sum)
+
+mn_reopen_bar_plot <-  mn_bar_Reopen %>%
+  ggplot(aes(x = Date, y = caes_sum_ratio)) +
+  geom_line(size = 1.05) +
+  geom_point(aes(y = caes_sum_ratio)) + 
+  geom_vline(xintercept=as.numeric(mn_bar_Reopen$Reopen_bars[1]), linetype=1,color = "red", size = 1.05)+
+  geom_text(aes(x=Reopen_bars[1],label=knitr::asis_output("Reopening bars,restaurants and movies \U2192"), y = 0, hjust = 1.04, vjust = -0.5), color = "red", size = 3.7) + 
+  scale_x_date(date_breaks  = "3 days", date_labels = "%b %d") +
+  labs(
+  title = "Proportion of New Covid Cases In Minnesota State",
+  subtitle = "Measured 3 weeks before and after reopening bars,restaurants and movies",
+  x = NULL, y = "Proportion") +
+  scale_fill_brewer(palette="Dark2") +
+  theme_bw() + 
+  theme(legend.position="top", axis.text.x = element_text(angle = 60, hjust = 1, colour = "black"))
+
+
+mn_gyms_cases_sum <- sum(mn_gyms_Reopen$covid_cases)
+mn_gyms_Reopen <- mn_gyms_Reopen%>%
+  mutate(caes_sum_ratio = covid_cases/mn_gyms_cases_sum)
+
+
+
+mn_reopen_gyms_plot <-  mn_gyms_Reopen %>%
+  ggplot(aes(x = Date, y = caes_sum_ratio)) +
+  geom_line(size = 1.05) +
+  geom_point(aes(y = caes_sum_ratio)) + 
+  geom_vline(xintercept=as.numeric(mn_gyms_Reopen$Reopen_gyms[1]),
+             linetype=1,color = "red", size = 1.05)+
+  geom_text(aes(x=Reopen_gyms[1], label=knitr::asis_output("Reopening gyms  \U2192"), y = 0, hjust = 1.01, vjust = -0.5), color = "red", size = 3.7) + 
+  scale_x_date(date_breaks  = "4 days", date_labels = "%b %d") +
+  labs(
+  title = "Proportion of New Covid Cases In Minnesota State",
+  subtitle = "Measured 3 weeks before and after reopening gym",
+  x = NULL, y = "Proportion",caption = "https://www.openicpsr.org/openicpsr/") +
+  scale_fill_brewer(palette="Dark2") +
+  theme_bw() + 
+  theme(legend.position="top",axis.text.x = element_text(angle = 60, hjust = 1, colour = "black"))
+
+gridExtra::grid.arrange(mn_reopen_bar_plot,mn_reopen_gyms_plot)
+
+
+```
+
+#### [**Plot analyzing:**]{.ul}
+
+Some findings can be seen from the results:
+
+1.  Minnesota decided in December to reopen the gyms and just three weeks later reopened the restaurants, movie theaters, and bars.
+
+2.  The morbidity trend before the reopening of the gyms was in steady decline which is probably why they decided to reopen the gyms
+
+3.  It can be seen that reopening the gyms did not cause a new coronavirus case to rise again. The morbidity index remained at about 0.02 and did not rise too much, so this is probably why the gyms were reopened earlier because they do not cause an increase in new coronavirus cases.
+
+4.  The reopening in January caused a further increase in morbidity, which reinforces the claim that the entertainment venues are affecting the spread of the pandemic. And that's why they decided to reopen them only the morbidity index value was low.
+
+#### [**The effect of the number of days that the social venues were closed on the new coronavirus cases:**]{.ul}
+
+We would now like to see whether the number of days they closed the entertainment venues has affected the spread of the epidemic in selected countries. To test this we will select a certain number of countries according to the length of time they were closed (according to the graph we showed in the first part). And we'll look at the average value of the daily morbidity index during the entire period when the entertainment venues in that state were closed. And so we will see whether a short-term closure of the entertainment venues reduced the number of new coronavirus cases or if it was necessary for the entertainment venues to be closed for a greater period of days.
+
+#### [**Creating tables for this part:**]{.ul}
+
+Since each state in the United States has a different date of closing and opening venues, it is not possible to use only one table of all states with coronavirus data on them. Therefore, we created for the states that we selected a table that corresponds to that state coronavirus data from the date the restriction was implemented until the restriction over.
+
+```{r creating states data,warning=FALSE,message=FALSE}
+clos_reopen_join <- left_join(states_close_reopen,covid_pivot,by = c("State"= "State"))
+
+clos_reopen_join <- ddply(clos_reopen_join,.(State),transform,total_cases = sum(covid_cases))
+
+
+az_bars <- clos_reopen_join %>%
+  select(State,Start_date,covid_cases,Restriction_time,Date,Reopen_date,Social_restriction)%>%
+  filter( State == "AZ" & Social_restriction == "Closed_bars")%>%
+  filter(  Date >= Start_date  & Date<= Reopen_date)
+
+ky_bars <- clos_reopen_join %>%
+  select(State,Start_date,covid_cases,Restriction_time,Date,Reopen_date,Social_restriction)%>%
+  filter( State == "KY" & Social_restriction == "Closed_bars")%>%
+  filter(  Date >= Start_date  & Date<= Reopen_date)
+
+ky_bars_sum <-  sum(ky_bars$covid_cases)
+ky_bars <- ky_bars%>%
+  mutate(cases_sum_ratio = covid_cases/ky_bars_sum)%>%
+  mutate(mean_case_ratio = mean(cases_sum_ratio))
+
+
+ky_bars_sum <- ky_bars%>%
+  distinct(State,mean_case_ratio,Restriction_time)
+
+
+nm_rest <-  clos_reopen_join %>%
+ select(State,Start_date,covid_cases,Restriction_time,Date,Reopen_date,Social_restriction)%>%
+  filter( State == "NM"& Social_restriction == "Closed_restaurants")%>%
+  filter(  Date >= Start_date  & Date<= Reopen_date)
+
+nm_rest_sum <-  sum(nm_rest$covid_cases)
+nm_rest <- nm_rest%>%
+  mutate(cases_sum_ratio = covid_cases/nm_rest_sum)%>%
+  mutate(mean_case_ratio = mean(cases_sum_ratio))
+
+nm_rest_sum <- nm_rest%>%
+  distinct(State,mean_case_ratio,Restriction_time)
+
+tx_bars <- clos_reopen_join %>%
+  select(State,Start_date,covid_cases,Restriction_time,Date,Reopen_date,Social_restriction)%>%
+  filter( State == "TX" & Social_restriction == "Closed_bars")%>%
+  filter(  Date >= Start_date  & Date<= Reopen_date)
+
+tx_bars_sum <-  sum(tx_bars$covid_cases)
+tx_bars <- tx_bars%>%
+  mutate(cases_sum_ratio = covid_cases/tx_bars_sum)%>%
+  mutate(mean_case_ratio = mean(cases_sum_ratio))
+
+tx_bars_sum <- tx_bars%>%
+  distinct(State,mean_case_ratio,Restriction_time)
+
+la_bars  <- clos_reopen_join %>%
+  select(State,Start_date,covid_cases,Restriction_time,Date,Reopen_date,Social_restriction)%>%
+  filter( State == "LA" & Social_restriction == "Closed_bars")%>%
+  filter(  Date >= Start_date  & Date<= Reopen_date)
+
+la_bars_sum <-  sum(la_bars$covid_cases)
+la_bars <- la_bars%>%
+  mutate(cases_sum_ratio = covid_cases/la_bars_sum)%>%
+  mutate(mean_case_ratio = mean(cases_sum_ratio))
+
+la_bars_sum <- la_bars%>%
+  distinct(State,mean_case_ratio,Restriction_time)
+ 
+wa_gyms <- clos_reopen_join %>%
+  select(State,Start_date,covid_cases,Restriction_time,Date,Reopen_date,Social_restriction)%>%
+  filter( State == "WA" & Social_restriction == "Closed_gyms")%>%
+  filter(  Date >= Start_date  & Date<= Reopen_date)
+
+il_movies <- clos_reopen_join %>%
+ select(State,Start_date,covid_cases,Restriction_time,Date,Reopen_date,Social_restriction)%>%
+  filter( State == "IL" & Social_restriction == "Closed_movies")%>%
+  filter(  Date >= Start_date  & Date<= Reopen_date)
+ 
+az_bars_sum <-  sum(az_bars$covid_cases)
+az_bars <- az_bars%>%
+  mutate(cases_sum_ratio = covid_cases/az_bars_sum)%>%
+  mutate(mean_case_ratio = mean(cases_sum_ratio))
+
+vt_bars <- clos_reopen_join %>%
+  select(State,Start_date,covid_cases,Restriction_time,Date,Reopen_date,Social_restriction)%>%
+  filter( State == "VT" & Social_restriction == "Closed_bars")%>%
+  filter(  Date >= Start_date  & Date<= Reopen_date)
+
+vt_bars_sum <-  sum(vt_bars$covid_cases)
+vt_bars <- vt_bars%>%
+  mutate(cases_sum_ratio = covid_cases/vt_bars_sum)%>%
+  mutate(mean_case_ratio = mean(cases_sum_ratio))
+
+vt_bars_sum <- vt_bars%>%
+  distinct(State,mean_case_ratio,Restriction_time)
+
+wa_gyms_sum <-  sum(wa_gyms$covid_cases)
+wa_gyms <- wa_gyms%>%
+  mutate(cases_sum_ratio = covid_cases/wa_gyms_sum)%>%
+  mutate(mean_case_ratio = mean(cases_sum_ratio))
+
+il_movies_sum <-  sum(il_movies$covid_cases)
+il_movies <- il_movies%>%
+  mutate(cases_sum_ratio = covid_cases/il_movies_sum)%>%
+  mutate(mean_case_ratio = mean(cases_sum_ratio))
+
+ca_rest <-  clos_reopen_join %>%
+ select(State,Start_date,covid_cases,Restriction_time,Date,Reopen_date,Social_restriction)%>%
+  filter( State == "CA"& Social_restriction == "Closed_restaurants")%>%
+  filter(  Date >= Start_date  & Date<= Reopen_date)
+
+ca_rest_sum <-  sum(ca_rest$covid_cases)
+ca_rest <- ca_rest%>%
+  mutate(cases_sum_ratio = covid_cases/ca_rest_sum)%>%
+  mutate(mean_case_ratio = mean(cases_sum_ratio))
+
+ca_rest_sum <- ca_rest%>%
+  distinct(State,mean_case_ratio,Restriction_time)
+
+il_movies_sum <- il_movies%>%
+  distinct(State,mean_case_ratio,Restriction_time)
+
+wa_gyms_sum <- wa_gyms%>%
+  distinct(State,mean_case_ratio,Restriction_time)
+
+az_bars_sum <- az_bars%>%
+  distinct(State,mean_case_ratio,Restriction_time)
+
+states_longest_rest <- rbind(ca_rest_sum,il_movies_sum,wa_gyms_sum,az_bars_sum,ky_bars_sum,nm_rest_sum,la_bars_sum,tx_bars_sum,vt_bars_sum)
+
+
+
+
+
+ 
+
+
+```
+
+```{r restriction effect on covid cases plot,warning=FALSE,message=FALSE}
+states_longest_rest%>%
+  ggplot(aes(x = as.numeric(Restriction_time),y = mean_case_ratio,color = State))+
+  geom_point(size = 3.5)+
+    labs(title = "The mean cases ratio in severel states",
+         subtitle = "Depending on the restriction time",
+       y = "Mean cases ratio",x = "Restriction time (in days)",
+       fill = "Social Places",caption = "https://www.openicpsr.org/openicpsr/")
+
+  
+
+```
+
+#### [**Plot analyzing:**]{.ul}
+
+The results from the graph directly show that the duration of the restriction on days significantly affects the morbidity trend. For example, the state of Kentucky, which has the smallest limit on the new coronavirus case index, is considerably higher than other states. By contrast, Arizona and California, whose new coronavirus case index is the lowest, have the highest number of days of restrictions. You can also see the trend of decline as the number of maritime restrictions increases and this only reinforces the impact of the restrictions on the new coronavirus cases.
+
+### [Conclusion:]{.ul}
+
+It can be seen that in the second wave of coronavirus, the ten countries carried out social restrictions that included closing the gyms, restaurants, bars and cinemas caused a decline in new coronavirus cases. In addition, we have seen that these restrictions need to take a relatively long time in order for them to be effective and have a significant impact.

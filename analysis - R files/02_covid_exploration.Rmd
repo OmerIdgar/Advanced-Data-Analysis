@@ -1,0 +1,361 @@
+---
+title: "Part 1 - Covid Exploration"
+author: "Idan Bibi, Guy Elovici and Omer Idgar"
+date: "12 6 2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries, message=FALSE, warning=FALSE, echo=FALSE}
+library(tidyverse)
+library(lubridate)
+library(glue)
+library(maps)
+library(mapdata)
+library(stringr)
+```
+
+First, we will read the covid tables files we created from the previous part.
+
+```{r import data, message=FALSE, echo=FALSE}
+path <- "C:\\Users\\User\\Desktop\\University\\Semester D\\Advanced Data Analysis in R\\FinalProject"
+
+covid_table <- readRDS(file = glue("{path}\\data\\covid_table.rds"))
+state_region <- readRDS(file = glue("{path}\\data\\state_region.rds"))
+daily_information <- readRDS(file = glue("{path}\\data\\daily_information.rds"))
+death_table <- readRDS(file = glue("{path}\\data\\death_table.rds"))
+states_fullname <- readRDS(file = glue("{path}\\data\\states_fullname.rds"))
+civiqs_poll <- read_csv(glue("{path}\\data\\civiqs_poll.csv"))
+election_res <- read.csv(glue("{path}\\data\\Popular_vote_backend_.csv"))
+state_population <- read.csv(glue("{path}\\data\\2019_Census_US_Population_Data_By_State_Lat_Long.csv"))
+
+```
+
+**Top 5 states plot:**
+
+Because we have a data of a lot of states that has an exceedingly small population, we want to explore the COVID 19 spread among the most populated states in the US. We found the top 5 most populated states in the us from reliable sources in the web. Moreover, we want to compare the difference of the COVID 19 spread from the start of the plague vs the current period. This may indicate the efficient of the vaccines and the lock down effect on stopping the spread of the COVID 19.
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+states <- c("CA", "FL", "PA", "TX", "NY")
+
+most_infected_in_month <- covid_table %>% 
+  mutate(month = month(Date),
+         year = year(Date)) %>%
+  select(-Date) %>% 
+  group_by(year, month) %>%
+  summarise(across(everything(), sum),.groups = "drop") %>%
+  rowwise() %>%
+  mutate(total = sum(across(AK:VI))) %>% 
+  ungroup() %>% 
+  arrange(desc(total)) %>% 
+  select(year, month) %>% 
+  head(1)
+
+worst_year <- as.numeric(most_infected_in_month[1])
+worst_month <- as.numeric(most_infected_in_month[2])
+
+covid_table %>% 
+  mutate(month = month(Date),
+         year = year(Date)) %>%
+  filter((month == worst_month & year == worst_year) | (month == 5 & year == 2021)) %>% 
+  mutate(period = if_else(month == worst_month & year == worst_year, "Early", "Late")) %>% 
+  select(-year,-month) %>% 
+  pivot_longer(AK:VI,
+               names_to = "state",
+               values_to = "count") %>% 
+  rename(date = Date) %>% 
+  filter(state %in% states) %>% 
+  ggplot(aes(x = date, y = count, colour = state)) + 
+      scale_colour_brewer(palette="Set1") +
+      geom_line(stat = "identity") + 
+      labs(
+      title = "The amount of infection daily for the five countries with the largest population",
+      subtitle = "Measured in the worst period, and last month in the United States",
+      x = NULL, y = "Daily infections",
+      caption = "Source: https://en.wikipedia.org") +
+      scale_fill_brewer(palette="Dark2") +
+      facet_wrap(~period,nrow = 1, scales = "free_x")+
+      theme_bw() + 
+      guides(colour = guide_legend(override.aes = list(size = 4))) +
+      theme(legend.position="top", legend.title = element_blank(), legend.key=element_rect(fill=NA))
+
+
+```
+
+**Plot analyzing:**
+
+We can be see from the plot that the number of cases in the beginning of the epidemic is extremely larger than in the current period (For example in May). We know from the news that from month of May 2020 40% of the US population got at least one dose of the COVID 19 vaccine. This may be the reason of why there is such a large difference in term of number of cases. Moreover, we can see that at the beginning of the epidemic the state of California had the largest number of COVID 19 cases. We know that California is the most populated state in the US, that may be the reason that at the beginning of the epidemic they had the largest number of COVID 19 cases. However, at the second plot that shows the number of COVID 19 cases in May 2021 we see that California does not have the largest number of covid 19 cases. That may be because the state of California gets a large number of vaccines for their population, or that they did Rigid restrictions for in their state that stop the spread of the COVID 19.
+
+**Region plot:**
+
+Some studies shows that the covid 19 is spreading much faster in cold Aries. We know that the US is an exceptionally large country that has many areas with different climates. And we have from the data the partition of the states to their geographic location (Northeast, Midwest...), so we want to show the number of cases of each region to see if the climate is a factor that should be taken under attention.
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+west <- state_region %>% filter(region == 'West') %>% select(state)
+midwest <- state_region %>% filter(region == 'Midwest') %>% select(state)
+south <- state_region %>% filter(region == 'South') %>% select(state)
+northeast <- state_region %>% filter(region == 'Northeast') %>% select(state)
+territories  <- state_region %>% filter(region == 'Territories') %>% select(state)
+
+date_and_sum <- covid_table %>%
+                    mutate(west_cases = rowSums(covid_table[,west$state]),
+                           midwest_cases = rowSums(covid_table[,midwest$state]),
+                           south_cases = rowSums(covid_table[,south$state]),
+                           northeast_cases = rowSums(covid_table[,northeast$state]),
+                  territories_cases = rowSums(covid_table[,territories$state])) %>%
+                           select(Date,west_cases,midwest_cases,south_cases,northeast_cases,territories_cases)
+
+date_and_sum_long <- date_and_sum %>%
+    gather(Description, value, west_cases:territories_cases)
+
+ggplot(date_and_sum_long, aes(x = Date, y = value, colour = Description)) +
+    geom_smooth(stat = "smooth", method = 'loess', formula =  'y ~ x',level = 1, span = 0.2, se = FALSE) +
+    scale_colour_discrete(labels = c('Midwest', 'Northest', 'South', 'Territories', 'West')) + 
+    scale_x_date(date_breaks  = "1 month", date_labels = "%b %y") +
+    theme_bw() + 
+    guides(colour = guide_legend(override.aes = list(size = 4)))+
+    theme(axis.text.x = element_text(angle = 60, hjust = 1, colour = "black"), legend.key=element_rect(fill=NA)) +  
+    labs(colour = "Region",
+         y = "Number of Corona Cases",
+         title = "Number of Corona Cases in Each Region",
+         caption = "Source: https://en.wikipedia.org")
+
+
+```
+
+**Plot analyzing:**
+
+It can be seen from the plot that the largest number of COVID 19 cases is during the months January, February and December. That may indicate that the cold weather that happening in these months in the US is increasing the spread of the COVID 19. Moreover, we can see that there is no increasing of the number of cases in the territories region. The reason may be because the states are in tropical climate (Hawaii, Puerto Rico), in this type of climate the weather is steady throughout the year. So, therefore we do not see an increasing of the spread of the COVID 19 in the territories region.
+
+**Number of deaths in each state plot:** We want to get a more detailed info about the total number of deaths in each state divided by state region. This will help us know which states in the us had the highest number of deaths in each region. Moreover, we get details if all the deaths of each region are from all the states, or it because a specific state that had an exceptionally large number of death cases.
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+total_death <- death_table %>%
+                  select(all_of(colnames(death_table)[-1])) %>%
+                  colSums()
+
+total_death <- data.frame(total = total_death / 1000)
+
+total_death <- total_death %>%
+                  mutate(state = rownames(total_death))
+
+rownames(total_death) <- 1:nrow(total_death)
+
+total_death1 <- total_death %>%
+                  right_join(state_region, by = "state") %>%
+                  mutate(state = fct_reorder(state, total))
+
+
+ggplot(total_death1, aes(x = total, y = state, fill = region)) + 
+  geom_col() + 
+  facet_wrap(~region, scales = "free_y") + 
+  labs(fill = "Region",
+       x = "Number of Deaths (In Thousands)", 
+       y = "States",
+       title = "Number of Deaths For each State",
+       subtitle = "Divided by Region",
+       caption = "Source: https://en.wikipedia.org") + 
+   theme(legend.title=element_blank(),legend.position="top") + 
+   theme_bw()
+
+
+```
+
+**Plot analyzing:** As we can see from the plot, in the west region most of the deaths were from the state of California. Moreover, we can see that the other states from the west region had a relatively small number of death cases. On the other hand, we see that in the Midwest region the difference of death cases in each state is not that different. And the partition of the death cases is Approximately equal.
+
+**Proportion of covid cases in each state map plot:** We wanted to see if they political party each states corresponds to has an effect of the percentage of covid cases. We wanted to check if there is a connection because of the covid - concern dataset which states that the people who belong to republican party are less concern and therefore could be more sick people because they don't take any precautions.
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+
+state <- map_data("state")
+state$region <- str_to_title(state$region)
+state <- state %>% mutate(region = case_when(state$region == "District Of Columbia" ~ "Washington DC",TRUE ~ region))
+
+election_res1 <- election_res %>%
+                  filter(nchar(stateid )<3) %>%
+                  select(stateid,called) %>%
+                  mutate_all(na_if,'') %>%
+                  rename(state = stateid) %>%
+                  drop_na()
+
+election_res1 <- election_res1 %>%
+                    inner_join(states_fullname, by = 'state')
+state <- state %>%
+          inner_join(election_res1, by = c('region' = 'fullname'))
+
+
+total_cases <- covid_table %>%
+                  select(all_of(election_res1$state)) %>%
+                  colSums()
+
+total_cases_table <- data.frame(sum_of_cases = total_cases)
+total_cases_table <- cbind(state = rownames(total_cases_table), total_cases_table)
+rownames(total_cases_table) <- 1:nrow(total_cases_table)
+
+state_population_1 <- state_population %>%
+                        rename(fullname = STATE, population = POPESTIMATE2019) %>%
+                        inner_join(states_fullname, by = c("fullname" = "fullname"))
+
+total_cases <- covid_table %>%
+  select(all_of(state_region$state)) %>%
+  colSums() 
+
+cases_percent <- data.frame(sick = total_cases)
+
+cases_percent <- cbind(state = rownames(cases_percent), cases_percent)
+rownames(cases_percent) <- 1:nrow(cases_percent)
+
+state <- state %>%
+          inner_join(cases_percent %>%
+                inner_join(state_population_1, by = c('state' = 'state')) %>%
+                mutate(percent = sick/population) %>%
+                select(state, percent), by = c('state' = 'state'))
+
+sick_map <- ggplot(data=state, aes(x=long, y=lat, fill=percent, group=group)) + 
+  geom_polygon(color = "white") +
+  geom_polygon(data = state %>% filter(called == 'R'), aes(color = called), size = 1.2) +
+  scale_fill_gradient(low = 'yellow', high = 'red',labels = scales::percent)+
+  scale_color_manual(values = c('black')) + 
+  theme(axis.title.x=element_blank(), axis.text.x=element_blank(), axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(), axis.text.y=element_blank(), axis.ticks.y=element_blank()) + 
+  labs(title = 'Proportion of Covid Cases and the Population in Each State',
+       subtitle = "Divided into Republican states and Democratic",
+       fill = "Severity",
+       caption = "Sources: https://www.kaggle.com/peretzcohen/2019-census-us-population-data-by-state,
+       https://en.wikipedia.org") +
+  guides(color = FALSE)
+
+sick_map
+
+
+```
+
+**Plot analyzing:**
+
+We can see that the North Dakota has the highest number of covid cases in proportion to their population with 14% sick people! In addition we can see that there is link between the political preference of each state to the severity of the corona virus because in the states that are considered republicans there is a higher percentage of confirmed cases.
+
+**Differences Between Winter And Summer 2020-2021 plot:** We wanted to see if the weather has an effect on the morbidity and mortality in the U.S.. Some people said that the disease spreads more in the summer because it is hot and other said that in the winter because of the cold.
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+summer <- c(6:8)
+winter <- c(1:2)
+
+daily_information %>%
+  mutate(month = month(Date),
+        year = year(Date)) %>%
+  select(year:Daily_Death) %>%
+  group_by(year, month) %>%
+  summarise(across(everything(), sum),.groups = "drop") %>%
+  rowwise() %>%
+  filter((year == 2020 && month %in% c(summer,12)) ||
+           (month %in% winter && year == 2021)) %>%
+  mutate(season = case_when(
+    month %in% summer ~ 'Summer',
+    month %in% c(winter,12) ~ 'Winter'
+  )) %>%
+  group_by(season) %>%
+  summarise(across(Total_Active:Daily_Death, sum),.groups = "drop") %>%
+  gather(type, value, Total_Active:Daily_Death) %>%
+  ggplot(aes(x = season,y = value, fill = type)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_discrete(labels = c('Death', 'Recovered', 'Sick'))+
+  scale_y_continuous(labels = scales::comma) +
+  facet_wrap(~type, scales="free_y", labeller = labeller(type =
+    c("Daily_Death" = "Death",
+      "Daily_Recovered" = "Recovered",
+      "Total_Active" = "Sick"))) +
+  theme_bw() +
+  theme(legend.title = element_blank()) +
+  labs(title = "Differences Between Winter And Summer 2020-2021",
+       subtitle = "In Different Elements of Covid",
+       y = "Number Of People",
+       x = "Season",
+       caption = "Source: https://en.wikipedia.org")
+
+```
+
+**Plot analyzing:**
+
+At first we can see that there is a complete difference between the morbidity and mortality and the different seasons. We can see that in the winter there are much more morbidity and mortality than in the summer. One reason could be that the corona virus is much similar to the flu which is usually common in the winter.
+
+**The Daily Change in Concern About Covid plot:** We wanted to see how the daily concern changes in each political party so we can see if the change is increasing or decreasing.
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+weekend <- c('Sunday', 'Saturday')
+civiqs_poll %>%
+          mutate(date = mdy(date),
+                 weekday = weekdays(date),
+                 isWeekday = weekdays(date) %in% weekend,
+                 change_dem = dem - lag(dem, default = dem[1]),
+                 change_rep = rep - lag(rep, default = rep[1]),
+                 change_diff = diff - lag(diff, default = diff[1])) %>%
+          gather(change, value, change_dem:change_diff) %>%
+          ggplot(aes(x = date, y = value, fill = change)) + 
+          stat_summary(geom = "bar", position = 'dodge', fun = "mean") + 
+          scale_fill_discrete(labels = c('Democratic', 'Difference', 'Republican'))+
+          facet_wrap(~change, nrow = 3, labeller = labeller(change = 
+                                        c("change_dem" = "Democratic",
+                                          "change_rep" = "Republican",
+                                          "change_diff" = "Difference"))) + 
+          scale_x_date(date_breaks  = "1 week", date_labels = "%b %d") +
+          theme_bw() +
+          theme(legend.title = element_blank()) +
+          labs(title = "The Daily Change in Concern About Covid",
+               subtitle = "In Different Policital Party",
+               x = 'Date',
+               y = 'Daily Change',
+               caption = "Source: https://civiqs.com")
+
+```
+
+**Plot analyzing:**
+
+We can see from the plot that the daily change in concern in both democratic and republican parties is positive which means that there are more concern about corona virus as time passes by. We can also see that the concern of republicans party is increasing much faster than the concern of democratic party and it explains the decreasing in the differences between the two.
+
+**Amount of Deaths and Concern plot:** We wanted to see how the amount of deaths each day affects the concern about the corona virus.
+
+```{r message=FALSE, warning=FALSE, echo=FALSE, fig.asp=1}
+
+civiq_and_death <- civiqs_poll %>%
+                      mutate(date = mdy(date)) %>%
+                      inner_join(covid_table %>%
+                          mutate(sum = rowSums(across(where(is.numeric)))) %>%
+                          select(Date, sum), by = c('date' = 'Date'))
+
+g1 <- civiq_and_death %>%
+  gather(type, value, c(dem, rep)) %>%
+  ggplot(aes(x = date, y = value, colour = type)) + 
+  geom_line(size = 1.09) + 
+  scale_x_date(date_breaks  ="3 day",date_labels = "%b %d") + 
+  scale_colour_manual(values = c("blue", "red"), labels = c('Democratic Concern', 'Republican Concern')) +
+  theme_bw() +
+  theme(axis.text.x = element_blank(),axis.title.x = element_blank(), legend.title = element_blank(), legend.position = 'top') +
+  labs(title = "Amount of Deaths and Concern in U.S",
+       y = 'Concern')
+
+g2 <- civiq_and_death %>%
+  ggplot(aes(x = date, y = sum)) + 
+  geom_smooth(size = 1.09, color = 'purple', method = 'loess', formula =  'y ~ x') +
+  scale_x_date(date_breaks  ="3 day",date_labels = "%b %d") + 
+  scale_y_continuous(trans = scales::log2_trans(), breaks = scales::trans_breaks("log2", function(x) 2^x),
+    labels = scales::trans_format("log2", scales::math_format(2^.x))) +
+  scale_color_manual(values = c('purple'), labels = c('Death')) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1, colour = "black"), legend.position = 'top', legend.key = element_rect(fill = "white", colour = "black")) +
+  labs(x = 'Date',
+       y = 'Deaths',
+       caption = "Sources: https://civiqs.com,
+                           https://en.wikipedia.org")
+
+gridExtra::grid.arrange(g1, g2)
+
+
+```
+
+**Plot analyzing:**
+
+We can see from the plot that as the number of dead increases so does the number of concern increases.\
+It makes sense because people are afraid to die, we can also see that the concern in the republican party is increasing is a higher rate than the concern in the democratic party. This change could be because at first the republican party were much indifferent and not concern at all in compared to the democratic party which were concern and because of the amount of dead their concern changed a lot.

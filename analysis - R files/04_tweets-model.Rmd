@@ -1,0 +1,318 @@
+---
+title: "Part 2 - Tweets Model"
+author: "Omer Idgar, Guy Elovici and Idan Bibi"
+date: "`r Sys.Date()`  "
+output: html_document
+---
+
+```{r load packages, echo=FALSE, message=FALSE, warning=FALSE}
+
+# packages
+library(tidyverse)
+library(tidymodels)
+library(tidytext)
+library(textrecipes)
+library(wordcloud2)
+library(glue)
+library(lubridate)
+library(scales)
+library(gghighlight)
+library(stringr)
+
+```
+
+```{r prepare data, echo=FALSE, message=FALSE, warning=FALSE}
+
+# read data
+path = "D:\\Omer - Main\\University\\Year 2\\Semester B\\Advanced Programming\\Project"
+
+trump_tweets <- read_rds(glue("{path}\\data\\trump-tweets.rds"))
+trump_tweets_words <- read_rds(glue("{path}\\data\\trump_tweets-words.rds"))
+trump_tweets_words_bigrams <- read_rds(glue("{path}\\data\\trump_tweets-words-bigrams.rds"))
+
+covid_concern <- read_csv(glue("{path}\\data\\civiqs_poll.csv"))
+
+# unite the tables
+trump_tweets <- trump_tweets %>% 
+  arrange(date)
+
+covid_concern <- covid_concern %>% 
+  mutate(date = mdy(date))
+
+covid_tweets <- trump_tweets %>% inner_join(covid_concern, by = "date")
+
+```
+
+![](D:/Omer%20-%20Main/University/Year%202/Semester%20B/Advanced%20Programming/Project/submission/Twitter-trump.jpg){width="900"}
+
+## [**Generate Hypothesis**]{.ul}
+
+#### Trump's tweets spread throughout the beginning of the Corona period in which he conveyed his messages to the nation and tried to convey the status of the existing COVID-19.
+
+#### In doing so, we want to see if there is a direct link between the statements he made, and the level of concern of his party's supporters who are more likely to follow him, the Republicans.
+
+## [**Explore the data**]{.ul}
+
+### Daily Tweets
+
+#### **Throughout the beginning of the Covid-19 period**
+
+##### We began by getting to know the information we received about the tweets by researching the amount of tweets Trump posted each day.
+
+```{r daily tweets, echo=FALSE, warning=FALSE}
+trump_tweets %>%
+  group_by(date) %>% 
+  summarise(total_tweets = n()) %>% 
+  mutate(color = (max(total_tweets) == total_tweets)) %>% 
+  ggplot(aes(x = date, y= total_tweets)) +
+    geom_line(color = "firebrick", size = 1.2) +
+    geom_point(size=2,color="firebrick3",aes(y=total_tweets))+
+    geom_point(shape = 21,size=6,stroke=2,fill="transparent",aes(color=color))+
+    geom_label(data = . %>% filter(total_tweets == max(total_tweets)), aes(label = total_tweets), hjust = -0.5) +
+    labs(
+      title = "Total Daily Tweets",
+      subtitle = "Tweeted by Trump",
+      x = "Date",
+      y = "Total Tweets"
+    )+
+  theme_bw()+
+  scale_y_continuous(breaks = seq(0,200,25))+
+  scale_x_date(date_breaks  ="2 day", date_labels = "%d-%m") +
+  theme(axis.text.x = element_text(angle = 50, hjust = 1, colour = "black"), legend.key=element_rect(fill=NA),legend.position = "None")+
+  scale_color_manual(values = c(NA, "darkblue"))
+  
+```
+
+##### One can clearly see a trend of an increase in the number of posts Trump sent towards the end of March, the period the disease began to erupt and therefore Trump should publish to the nation as much information as possible about the new virus.
+
+###### ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+### Sentiment Analysis
+
+#### Sentiments: Positive and negative.
+
+##### We have continued to investigate the distribution of sentiments that Trump uses. The use of positive and negative terms can emotionally affect citizens' sense of concern through a sense of calm / crisis.
+
+##### We presented the distribution of words in a way that would emphasize the amount of use of a particular word and emphasize the color that indicates whether it is a positive or negative word.
+
+```{r sentiments, echo=FALSE, message=FALSE, warning=FALSE, fig.asp = 0.9}
+trump_tweets_words <- trump_tweets_words %>%
+  anti_join(stop_words, by = "word")
+
+trump_tweets_words %>%
+  inner_join(get_sentiments("bing"), by = "word") %>%
+  count(sentiment, word, sort = TRUE) %>%
+  filter(word!="trump", n > 5) %>%
+  mutate(colors=ifelse(sentiment=="positive","Green","Red")) %>%
+  select(-sentiment) %>% 
+  wordcloud2(color = .$colors,rotateRatio = 0)
+
+```
+
+##### It can be seen that there are a number of words that Trump used most often. Words like "fake" show contempt for the plague and thus may lower the level of concern of the citizens. There are also positive words that he also uses frequently such as "strong", "support" and "relief" which help to present a situation where the epidemic is under control and may also cause the concern of his supporters to decrease.
+
+###### ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+### Bigram Frequency
+
+##### Following the analysis of the sentiments, we examined the pairs of words that Trump commonly used. There are several pairs of words that can convey a different message when used in pairs.
+
+```{r bigram, echo=FALSE, message=FALSE, warning=FALSE, fig.asp = 0.9}
+threshold <- 10
+
+trump_tweets_words_bigrams %>%
+  count(bigram, sort = TRUE) %>%
+  filter(n > threshold) %>%
+  ggplot(aes(y = fct_reorder(bigram, n), x = n, fill = n)) +
+  geom_col() +
+  theme_bw()+
+  guides(fill = FALSE) +
+  labs(
+    title = "Frequency of bigrams in Trump Tweets",
+    subtitle = glue("Bigrams occurring more than {threshold} times"),
+    y = NULL, x = NULL
+  )+
+  scale_x_continuous(breaks = seq(0,60,5))
+
+```
+
+##### We have noticed that similar to the most common word "fake", Trump has used the phrase "fake news" the most times, and is actually trying to convey a situation where the epidemic does not even exist. It can be seen that there are also a number of words that come to convey information and guidelines to citizens such as "coronavirus task", "social distancing".
+
+###### ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+### COVID Concern
+
+##### Before we get into the model, let's note that the level of concern for each political party varies throughout the Trump tweets period.
+
+```{r concern, echo=FALSE, message=FALSE, warning=FALSE, fig.asp = 0.9}
+
+covid_concern %>%
+  gather(Description, value, dem:rep) %>%
+  ggplot(aes(x = date, y = value, colour = Description)) +
+  geom_line(size = 1.2) +
+  geom_hline(yintercept = 0) + 
+  geom_vline(xintercept = mdy("03-22-2020"), linetype = "dashed", size = 1.1, colour = "red") + 
+  geom_point(size = 2) +
+  theme_bw() +
+  scale_color_manual(values = c("dodgerblue3", "firebrick"), labels = c('Democratic Concern', 'Republican Concern'))+
+  scale_y_continuous(breaks = seq(-100,100,10))+
+  guides(colour = guide_legend(override.aes = list(size = 2))) +
+  theme(axis.text.x = element_text(angle = 50, hjust = 1, colour = "black"),legend.position="top", legend.title = element_blank(), legend.key=element_rect(fill=NA)) +
+    scale_x_date(date_breaks  ="2 day", date_labels = "%d-%m") +
+    labs(title = "Concern in U.S of Different Political Parties",
+         x = 'Date',
+         y = 'Level of Concern')
+
+```
+
+##### It can be seen that from the very beginning, the level of concern of the two parties was different. The Democrats' level of concern was positive, meaning they were indeed concerned about the disease. Supporters of the Republican Party, on the other hand, did not care at all about the plague. Thus for most of the time it can be seen that the Republicans did not really "worry" about the plague.
+
+##### The special statistic that can be seen from the result is that the change of Republicans from lack of concern to concern occurs around the date when Trump started tweeting the highest amount of tweets (which we mentioned in the first graph).
+
+##### From this, one can see the impact that Trump has had on his supporters through his tweets and it can be understood that there is a connection between the level of concern of the Republicans and the tweets of Trump.
+
+###### ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+## [**Build the Model**]{.ul}
+
+we start with splitting the data into train and test parts.
+
+```{r split data}
+
+set.seed(323040758)
+
+# split to train / test
+covid_split <- initial_split(covid_tweets, prop = 8/10)
+covid_train <- training(covid_split)
+covid_test  <- testing(covid_split)
+```
+
+We can notice the size of the rows received in each group
+
+```{r dimensions}
+
+dim(covid_tweets)
+dim(covid_train) # 80%
+dim(covid_test) #20 %
+
+```
+
+Now, we'll create our model. In our model we try to predict the level of concern of the Republican Party using the existing text in Trump's tweets. To do this, we will define a linear regression model that predicts the exact value of the level of concern.
+
+```{r build model, warning=FALSE}
+
+# specify model
+linear_model <- linear_reg(penalty = 0.005) %>%
+  set_engine("glmnet")
+
+
+# build recipe
+covid_rec <- recipe(rep ~ text, data = covid_train) %>%
+  step_tokenize(text, token = "words") %>%
+  step_stopwords(text) %>%
+  step_ngram(text, num_tokens = 3, min_num_tokens = 1) %>%
+  step_tfidf(text)
+
+
+# build workflow
+covid_wflow <- workflow() %>%
+  add_model(linear_model) %>%
+  add_recipe(covid_rec)
+
+```
+
+Now, we will train our data via "cross validation" and present the results for the model
+
+```{r cross validaton, warning=FALSE}
+
+# cross validation
+folds <- vfold_cv(covid_train, v = 10)  
+
+
+# fit resamples
+covid_fit_rs <- covid_wflow %>%
+ fit_resamples(
+   folds,
+   control = control_resamples(save_pred = TRUE)
+ )
+
+```
+
+Evaluate with r-squared and rmse
+
+```{r errors, warning=FALSE}
+
+results <- collect_metrics(covid_fit_rs,summarize = FALSE) %>%
+  select(id,.metric, .estimate) %>% 
+  pivot_wider(names_from = .metric, values_from = .estimate)%>%
+  rename(Fold = id ,RMSE = rmse,"R_squared" = rsq) 
+
+mean_row <- results %>%
+  summarise_all(mean) %>%
+  mutate(Fold = "mean:")
+
+results %>%
+  bind_rows(mean_row) %>%
+  print(n=11) 
+
+```
+
+Evaluate with pearson correlation
+
+```{r pearson, warning=FALSE}
+predictions <- collect_predictions(covid_fit_rs)%>%
+  select(id,.pred, rep) %>% 
+  group_by(id) %>% 
+  nest()
+
+get_cor <- function(df) {
+  cor(df$rep,df$.pred,method = "pearson")
+}
+
+pearson_values <- unlist(map(predictions$data, get_cor))
+
+mean_row <- data.frame(id="mean:",Pearson_R =pearson_values %>%mean())
+
+predictions %>% 
+  select(id) %>% 
+  bind_cols(Pearson_R=pearson_values) %>% 
+  rbind(mean_row) %>%
+  print(n=11)
+
+```
+
+We will now present the predictions for the model we built on our training part, and present the results for the test part.
+
+```{r predictions, warning=FALSE}
+
+# make predictions for train and test data
+
+covid_fit <- covid_wflow %>%
+  fit(data = covid_train)
+
+
+covid_train_pred <- predict(covid_fit, covid_train) %>%
+  bind_cols(covid_train %>% select(rep, text))
+
+
+covid_test_pred <- predict(covid_fit, new_data = covid_test) %>%
+  bind_cols(covid_test %>% select(rep, text))
+
+
+```
+
+```{r view results, warning=FALSE}
+
+covid_train_pred
+
+covid_test_pred
+
+```
+
+## [**Summarizing**]{.ul}
+
+We will conclude by saying that we have seen by using the "cross validation" model we have obtained results that do not necessarily succeed in clearly predicting the level of concern. In addition, for the attempt to predict the results for the test part we received inaccurate results for the prediction that should be obtained.
+
+This result can be explained using the data we received. In our opinion, the text we got for each Trump tweet was not too long and even most of it consisted of "dirty" arrays, so the dataset building came out even though there are a number of rich texts that made it difficult to predict the value of Republicans' level of concern.
+
+Therefore, it can be said that the level of concern of the Republicans can not be accurately predicted through the tweets of Trump.
